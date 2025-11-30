@@ -1,0 +1,7 @@
+{
+  "name": "Copy of Copy of Chronos: Historia Viva (Deploy) con Mic",
+  "description": "Una experiencia de simulación histórica inmersiva donde conversas con figuras del pasado en fechas específicas, con visualización de escenas en tiempo real.",
+  "requestFramePermissions": [
+    "microphone"
+  ]
+}
