@@ -123,9 +123,6 @@ Example Response:
 
   async generateSpeech(text: string, gender: 'MALE' | 'FEMALE'): Promise<string | null> {
     try {
-      // Pick voice based on gender mapping
-      // Male options: Fenrir, Charon, Orpheus (Puck is simpler)
-      // Female options: Kore, Aoede
       const voiceName = gender === 'MALE' ? 'Charon' : 'Kore';
 
       const response = await ai.models.generateContent({
@@ -185,6 +182,33 @@ Example Response:
     } catch (error) {
       console.error("Error fetching lifespan:", error);
       return null;
+    }
+  }
+
+  async transcribeAudio(base64Audio: string, language: Language): Promise<string | null> {
+    try {
+        const langMap: Record<Language, string> = {
+            es: 'Spanish',
+            en: 'English',
+            fr: 'French',
+            de: 'German',
+            ja: 'Japanese'
+        };
+        const targetLang = langMap[language] || 'Spanish';
+
+        const response = await ai.models.generateContent({
+            model: 'gemini-2.5-flash',
+            contents: {
+                parts: [
+                    { inlineData: { mimeType: 'audio/wav', data: base64Audio } },
+                    { text: `Transcribe this audio exactly as spoken. The language is likely ${targetLang}. Return ONLY the text, nothing else.` }
+                ]
+            }
+        });
+        return response.text?.trim() || null;
+    } catch (error) {
+        console.error("Transcription error:", error);
+        return null;
     }
   }
 }

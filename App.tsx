@@ -54,8 +54,12 @@ const App: React.FC = () => {
   }, []);
 
   const saveHistoryToStorage = (sessions: SavedSession[]) => {
-      localStorage.setItem(LOCAL_STORAGE_KEY, JSON.stringify(sessions));
-      setSavedSessions(sessions);
+      try {
+        localStorage.setItem(LOCAL_STORAGE_KEY, JSON.stringify(sessions));
+        setSavedSessions(sessions);
+      } catch (e) {
+        console.error("Storage limit reached or error saving", e);
+      }
   };
 
   const updateCurrentSession = (msgs: Message[], cfg: SessionConfig) => {
@@ -193,9 +197,14 @@ const App: React.FC = () => {
       
     } catch (error) {
       console.error("Error exchanging messages", error);
+      // In case of error, just stop typing, don't crash app state
     } finally {
       setIsTyping(false);
     }
+  };
+
+  const handleDictate = async (base64Audio: string): Promise<string | null> => {
+      return await geminiService.transcribeAudio(base64Audio, language);
   };
 
   const handleImageGeneration = async (messageId: string, prompt: string) => {
@@ -364,6 +373,7 @@ const App: React.FC = () => {
             <ChatInterface 
                 messages={messages} 
                 onSendMessage={handleSendMessage}
+                onDictate={handleDictate}
                 onExit={handleExitSession}
                 characterName={config.character}
                 date={config.date}
@@ -382,6 +392,7 @@ const App: React.FC = () => {
           <ChatInterface 
             messages={messages} 
             onSendMessage={handleSendMessage}
+            onDictate={handleDictate}
             onExit={handleExitSession}
             characterName={config.character}
             date={config.date}

@@ -1,19 +1,12 @@
 import React, { useRef, useEffect, useState } from 'react';
 import { Message, Language, TRANSLATIONS } from '../types';
-import { Send, User, Cpu, Mic, MicOff, Volume2, Loader2, Play, Power, Archive } from 'lucide-react';
+import { Send, User, Cpu, Mic, Volume2, Loader2, Play, Power, StopCircle } from 'lucide-react';
 import { Button } from './Button';
-
-// Extend window interface for SpeechRecognition
-declare global {
-  interface Window {
-    SpeechRecognition: any;
-    webkitSpeechRecognition: any;
-  }
-}
 
 interface ChatInterfaceProps {
   messages: Message[];
   onSendMessage: (text: string) => void;
+  onDictate: (audioBase64: string) => Promise<string | null>;
   onPlayAudio: (messageId: string, text: string) => void;
   onExit: () => void;
   characterName: string;
@@ -27,6 +20,7 @@ interface ChatInterfaceProps {
 export const ChatInterface: React.FC<ChatInterfaceProps> = ({ 
   messages, 
   onSendMessage, 
+  onDictate,
   onPlayAudio,
   onExit,
   characterName,
@@ -37,66 +31,13 @@ export const ChatInterface: React.FC<ChatInterfaceProps> = ({
   language
 }) => {
   const [inputValue, setInputValue] = useState('');
-  const [isListening, setIsListening] = useState(false);
+  const [isRecording, setIsRecording] = useState(false);
+  const [isProcessingAudio, setIsProcessingAudio] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
-  const recognitionRef = useRef<any>(null);
+  
+  const mediaRecorderRef = useRef<MediaRecorder | null>(null);
+  const audioChunksRef = useRef<Blob[]>([]);
   const t = TRANSLATIONS[language];
-
-  // Initialize Speech Recognition
-  useEffect(() => {
-    const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
-    if (SpeechRecognition) {
-      const recognition = new SpeechRecognition();
-      recognition.continuous = false;
-      
-      // Map simple lang code to region code for Web Speech API
-      const langLocales: Record<Language, string> = {
-          es: 'es-ES',
-          en: 'en-US',
-          fr: 'fr-FR',
-          de: 'de-DE',
-          ja: 'ja-JP'
-      };
-      recognition.lang = langLocales[language] || 'es-ES';
-      
-      recognition.interimResults = false;
-
-      recognition.onresult = (event: any) => {
-        const transcript = event.results[0][0].transcript;
-        setInputValue(prev => prev + (prev ? ' ' : '') + transcript);
-        setIsListening(false);
-      };
-
-      recognition.onerror = (event: any) => {
-        console.error("Speech recognition error", event.error);
-        setIsListening(false);
-      };
-
-      recognition.onend = () => {
-        setIsListening(false);
-      };
-
-      recognitionRef.current = recognition;
-    }
-  }, [language]);
-
-  const toggleListening = () => {
-    if (isListening) {
-      recognitionRef.current?.stop();
-      setIsListening(false);
-    } else {
-      if (recognitionRef.current) {
-        try {
-          recognitionRef.current.start();
-          setIsListening(true);
-        } catch (e) {
-          console.error(e);
-        }
-      } else {
-        alert("Browser does not support Speech Recognition.");
-      }
-    }
-  };
 
   const scrollToBottom = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -105,6 +46,68 @@ export const ChatInterface: React.FC<ChatInterfaceProps> = ({
   useEffect(() => {
     scrollToBottom();
   }, [messages, isTyping]);
+
+  const startRecording = async () => {
+    try {
+        const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+        const mediaRecorder = new MediaRecorder(stream);
+        mediaRecorderRef.current = mediaRecorder;
+        audioChunksRef.current = [];
+
+        mediaRecorder.ondataavailable = (event) => {
+            if (event.data.size > 0) {
+                audioChunksRef.current.push(event.data);
+            }
+        };
+
+        mediaRecorder.onstop = async () => {
+            const audioBlob = new Blob(audioChunksRef.current, { type: 'audio/wav' });
+            
+            // Stop all tracks to release microphone
+            stream.getTracks().forEach(track => track.stop());
+            
+            setIsRecording(false);
+            setIsProcessingAudio(true);
+
+            // Convert blob to base64
+            const reader = new FileReader();
+            reader.readAsDataURL(audioBlob);
+            reader.onloadend = async () => {
+                const base64String = reader.result as string;
+                // Remove data url prefix
+                const base64 = base64String.split(',')[1];
+                
+                const text = await onDictate(base64);
+                if (text) {
+                    setInputValue(prev => prev + (prev ? ' ' : '') + text);
+                }
+                setIsProcessingAudio(false);
+            };
+        };
+
+        mediaRecorder.start();
+        setIsRecording(true);
+    } catch (err) {
+        console.error("Microphone access denied:", err);
+        alert("Microphone access is required to use voice features.");
+        setIsRecording(false);
+    }
+  };
+
+  const stopRecording = () => {
+      if (mediaRecorderRef.current && isRecording) {
+          mediaRecorderRef.current.stop();
+          // State update handled in onstop event
+      }
+  };
+
+  const toggleRecording = () => {
+      if (isRecording) {
+          stopRecording();
+      } else {
+          startRecording();
+      }
+  };
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -228,9 +231,9 @@ export const ChatInterface: React.FC<ChatInterfaceProps> = ({
                 type="text"
                 value={inputValue}
                 onChange={(e) => setInputValue(e.target.value)}
-                placeholder={`${t.transmitPlaceholder} ${characterName}...`}
-                className="w-full bg-slate-900/50 border border-slate-700 pl-4 pr-12 py-3 text-white placeholder-slate-600 font-data focus:outline-none focus:border-cyan-500 focus:bg-slate-900 transition-all"
-                disabled={isTyping}
+                placeholder={isRecording ? "Recording audio..." : `${t.transmitPlaceholder} ${characterName}...`}
+                className={`w-full bg-slate-900/50 border border-slate-700 pl-4 pr-12 py-3 text-white placeholder-slate-600 font-data focus:outline-none focus:border-cyan-500 focus:bg-slate-900 transition-all ${isRecording ? 'border-red-500/50 text-red-200' : ''}`}
+                disabled={isTyping || isRecording || isProcessingAudio}
             />
             {/* Corner Accents */}
             <div className="absolute top-0 right-0 w-2 h-2 border-t border-r border-slate-500 group-focus-within:border-cyan-500 transition-colors"></div>
@@ -239,21 +242,24 @@ export const ChatInterface: React.FC<ChatInterfaceProps> = ({
             {/* Mic Button inside Input */}
             <button
                 type="button"
-                onClick={toggleListening}
-                className={`absolute right-2 top-2 p-1.5 rounded-sm transition-all ${
-                    isListening 
-                    ? 'text-red-500 animate-pulse bg-red-900/20' 
-                    : 'text-slate-500 hover:text-cyan-400'
+                onClick={toggleRecording}
+                disabled={isProcessingAudio}
+                className={`absolute right-2 top-2 p-1.5 rounded-sm transition-all z-20 ${
+                    isRecording 
+                    ? 'text-red-500 animate-pulse bg-red-900/20 shadow-[0_0_10px_rgba(220,38,38,0.5)]' 
+                    : isProcessingAudio
+                        ? 'text-cyan-500 animate-spin'
+                        : 'text-slate-500 hover:text-cyan-400'
                 }`}
                 title={t.dictate}
             >
-                {isListening ? <MicOff size={18} /> : <Mic size={18} />}
+                {isProcessingAudio ? <Loader2 size={18} /> : isRecording ? <StopCircle size={18} fill="currentColor" /> : <Mic size={18} />}
             </button>
           </div>
 
           <Button
             type="submit"
-            disabled={!inputValue.trim() || isTyping}
+            disabled={!inputValue.trim() || isTyping || isRecording || isProcessingAudio}
             className="px-4"
             variant="primary"
           >
